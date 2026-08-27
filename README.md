@@ -1,56 +1,22 @@
-# riverSys
+# riverSys — python branch
 
-Floating plastic detection and segregation for **Raspberry Pi 5 + Camera Module 3**.
-
-## Branches
-
-| Branch | Focus | Start |
-|--------|--------|--------|
-| `main` | Full system (Python display + web API) | see below |
-| `python` | OpenCV / HDMI local display + servo | `bash run_display.sh` |
-| `web` | FastAPI + HTML dashboard + servo | `bash run_api.sh` |
-
-## Hardware
-
-- Raspberry Pi 5 (8 GB)
-- Camera Module 3
-- One 20 kg servo on **GPIO 18** (external 5–6 V power; common GND with Pi)
-- Dataset / models on USB: `/media/river/6A1E-2BCD/`
-
-## Setup
-
-```bash
-cd /home/river/projectRiver   # or your clone path
-bash scripts/setup_env.sh
-python scripts/prepare_dataset.py
-```
-
-Use Debian `python3-torch` via apt (setup script does this). Do **not** `pip install torch` on aarch64 — PyPI may pull huge CUDA wheels.
+OpenCV / HDMI **Python display** for Raspberry Pi 5 + Camera Module 3.
 
 ## Run
 
-**Python display (HDMI):**
-
 ```bash
+bash scripts/setup_env.sh
 bash run_display.sh
-# or desktop icon → Plastic Segregation (tmux)
+# or: desktop icon "Plastic Segregation" (tmux)
 ```
 
-**Web UI:**
+## Includes
 
-```bash
-bash run_api.sh
-# open http://<pi-ip>:8000
-```
+- Live camera detection (OpenCV fallback / YOLO when trained)
+- LEFT / RIGHT drop zones
+- TRAIN toggle + label prompts
+- Servo calibration / swap bins / auto-sort
+- Shared `backend/` (camera, detector, servo)
 
-## Features
-
-- Recyclable vs non-recyclable sorting via servo (±60° by default, calibratable)
-- LEFT / RIGHT drop zones on camera view
-- Training mode (label live detections → USB YOLO dataset)
-- Servo calibration + swap bins
-- OpenCV fallback until a custom YOLO model is trained
-
-## License
-
-Project scaffolding for Hugh-Templo/riverSys.
+Web dashboard lives on the `web` branch (`bash run_api.sh`).
+Full tree also on `main`.
