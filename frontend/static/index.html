@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plastic Segregation</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Raspberry Pi 5 · Camera Module 3</p>
+        <h1>Plastic Segregation</h1>
+      </div>
+      <div class="pill-row" id="modePill">mode: —</div>
+    </header>
+
+    <main class="stage">
+      <section class="viewer">
+        <img id="stream" src="/api/stream" alt="Live detection stream" />
+      </section>
+
+      <aside class="panel">
+        <div class="card-block">
+          <h2>Decision</h2>
+          <p id="decision" class="decision idle">waiting…</p>
+          <p id="servoState" class="muted">servo: —</p>
+        </div>
+
+        <div class="card-block">
+          <h2>Detections</h2>
+          <ul id="detections" class="detections"></ul>
+        </div>
+
+        <div class="card-block">
+          <h2>Controls</h2>
+          <label class="toggle">
+            <input type="checkbox" id="autoSort" checked />
+            Auto-sort with servo
+          </label>
+          <label class="slider">
+            Confidence
+            <input type="range" id="conf" min="0.2" max="0.9" step="0.05" value="0.45" />
+            <span id="confVal">0.45</span>
+          </label>
+          <div class="btn-row">
+            <button data-sort="recyclable">Recyclable</button>
+            <button data-sort="non_recyclable" class="danger">Non-recyclable</button>
+          </div>
+          <div class="btn-row">
+            <button id="homeBtn" class="ghost">Servo home</button>
+            <button id="reloadBtn" class="ghost">Reload model</button>
+          </div>
+        </div>
+
+        <div class="card-block compact">
+          <p class="muted" id="healthLine">connecting…</p>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

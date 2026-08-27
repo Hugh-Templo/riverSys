@@ -1,0 +1,8 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+ultralytics>=8.3.0
+pydantic>=2.0.0
+python-multipart>=0.0.9
+# On Raspberry Pi OS, install these via apt (keeps the 16GB SD card usable):
+#   sudo apt install python3-opencv python3-picamera2 python3-lgpio python3-torch python3-torchvision
+# Do NOT pip-install torch — PyPI may pull multi-GB NVIDIA CUDA wheels on aarch64.
