@@ -29,6 +29,40 @@ from backend.servo import ServoSorter
 from backend.train_capture import save_center_training_sample
 
 
+def _detect_screen_size() -> tuple[int, int]:
+    """Best-effort HDMI / desktop resolution for fullscreen scaling."""
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        w, h = int(root.winfo_screenwidth()), int(root.winfo_screenheight())
+        root.destroy()
+        if w >= 320 and h >= 240:
+            return w, h
+    except Exception:
+        pass
+    try:
+        import subprocess
+
+        out = subprocess.check_output(
+            ["xrandr", "--current"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        for line in out.splitlines():
+            if "*" in line:
+                # e.g. "   1920x1080     60.00*+ ..."
+                token = line.strip().split()[0]
+                if "x" in token:
+                    w_s, h_s = token.split("x", 1)
+                    return int(w_s), int(h_s)
+    except Exception:
+        pass
+    return config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+
+
 @dataclass
 class UiButton:
     name: str
@@ -64,6 +98,10 @@ class DisplayApp:
         self.sorter = ServoSorter()
         self.window = "Plastic Segregation"
         self._train_frame: Optional[np.ndarray] = None
+        self._frame_w = config.CAMERA_WIDTH
+        self._frame_h = config.CAMERA_HEIGHT
+        self._screen_w, self._screen_h = _detect_screen_size()
+        self.fullscreen = True
 
     def set_status(self, msg: str, seconds: float = 2.5) -> None:
         self.status_msg = msg
@@ -72,6 +110,10 @@ class DisplayApp:
     def on_mouse(self, event: int, x: int, y: int, _flags: int, _param) -> None:
         if event != cv2.EVENT_LBUTTONDOWN:
             return
+        # Map fullscreen/window pixels back to camera-frame coordinates.
+        if self._screen_w > 0 and self._frame_w > 0:
+            x = int(x * self._frame_w / self._screen_w)
+            y = int(y * self._frame_h / self._screen_h)
         self.last_click = (x, y)
         for btn in self.buttons:
             if btn.x1 <= x <= btn.x2 and btn.y1 <= y <= btn.y2:
@@ -327,6 +369,9 @@ class DisplayApp:
             self.set_status(f"Auto-sort {'ON' if self.auto_sort else 'OFF'}")
         elif action == "swap" or key == ord("s"):
             self._swap_bins()
+        elif key == ord("f"):
+            self._apply_fullscreen(not self.fullscreen)
+            self.set_status(f"Fullscreen {'ON' if self.fullscreen else 'OFF'}")
         elif key == ord("r"):
             self.sorter.sort_recyclable()
         elif key == ord("n"):
@@ -340,10 +385,7 @@ class DisplayApp:
             cv2.namedWindow(self.window, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         except Exception:
             cv2.namedWindow(self.window, cv2.WINDOW_NORMAL)
-        try:
-            cv2.resizeWindow(self.window, config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
-        except Exception:
-            pass
+        self._apply_fullscreen(True)
         cv2.setMouseCallback(self.window, self.on_mouse)
 
         print(
@@ -353,6 +395,7 @@ class DisplayApp:
             "  SWAP BINS / s      flip which side is which\n"
             "  AUTO / a           auto drop with servo\n"
             "  r / n              manual drop    h home    q quit\n"
+            "  f                  toggle fullscreen\n"
             "  Calibration: [ ] +/-5°  - = +/-1°  ENTER save side"
         )
 
@@ -365,6 +408,7 @@ class DisplayApp:
 
                 self._train_frame = frame
                 h, w = frame.shape[:2]
+                self._frame_w, self._frame_h = w, h
                 self._build_buttons(w, h)
 
                 action = self.click_action
@@ -425,13 +469,45 @@ class DisplayApp:
                     self.last_sort = now
                     self.set_status(f"Dropped {decision} → {side.upper()} @ {angle:+.0f}°")
 
-                cv2.imshow(self.window, show)
+                display = show
+                if (show.shape[1], show.shape[0]) != (self._screen_w, self._screen_h):
+                    display = cv2.resize(
+                        show,
+                        (self._screen_w, self._screen_h),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+                cv2.imshow(self.window, display)
                 key = cv2.waitKey(1) & 0xFF
                 if not self._handle(action, key):
                     break
         finally:
             self._shutdown_ui()
         return 0
+
+    def _apply_fullscreen(self, enabled: bool) -> None:
+        self.fullscreen = enabled
+        try:
+            prop = cv2.WINDOW_FULLSCREEN if enabled else cv2.WINDOW_NORMAL
+            cv2.setWindowProperty(self.window, cv2.WND_PROP_FULLSCREEN, prop)
+        except Exception:
+            pass
+        if enabled:
+            try:
+                cv2.resizeWindow(self.window, self._screen_w, self._screen_h)
+            except Exception:
+                pass
+        else:
+            try:
+                cv2.resizeWindow(self.window, config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
+            except Exception:
+                pass
+            # Refresh detected size when leaving fullscreen (window may differ).
+            self._screen_w, self._screen_h = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+        if enabled:
+            # Keep using the true screen size for scaling + click mapping.
+            detected = _detect_screen_size()
+            if detected[0] >= 320 and detected[1] >= 240:
+                self._screen_w, self._screen_h = detected
 
     def _shutdown_ui(self) -> None:
         """Tear down camera/servo/window in an order that avoids Qt/GLib unref noise."""
