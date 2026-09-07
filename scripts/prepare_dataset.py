@@ -20,13 +20,13 @@ train: images/train
 val: images/val
 
 names:
-  0: recyclable
-  1: non_recyclable
+  0: biodegradable
+  1: non_biodegradable
 
 # Labeling guide (YOLO txt next to each image name under labels/):
 #   class_id  x_center  y_center  width  height   (all normalized 0-1)
-# class 0 = recyclable (bottles / hard plastic)
-# class 1 = non_recyclable (bags / film / fragments)
+# class 0 = biodegradable (food / paper / organics)
+# class 1 = non_biodegradable (plastic bottles / bags / film)
 """
 
 

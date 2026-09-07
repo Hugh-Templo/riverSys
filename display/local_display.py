@@ -19,14 +19,14 @@ import numpy as np
 from backend import config
 from backend.calibration import (
     load_calibration,
-    point_in_zone,
     save_calibration,
     zone_pixels,
 )
 from backend.camera import CameraService
 from backend.detector import Detection, PlasticDetector, draw_detections
+from backend.object_memory import ObjectMemory, center_train_box
 from backend.servo import ServoSorter
-from backend.train_capture import save_training_sample
+from backend.train_capture import save_center_training_sample
 
 
 @dataclass
@@ -47,9 +47,8 @@ class DisplayApp:
         self.calibrating = False
         self.cal_step = 0
         self.cal_angle = 0.0
-        self.pending: Optional[tuple[np.ndarray, Detection]] = None
-        self.last_train_prompt = 0.0
         self.last_sort = 0.0
+        self.last_train_save = 0.0
         self.status_msg = ""
         self.status_until = 0.0
         self.click_action: Optional[str] = None
@@ -58,10 +57,13 @@ class DisplayApp:
         self.left_zone_px = (0, 0, 0, 0)
         self.right_zone_px = (0, 0, 0, 0)
         self.cal = load_calibration()
+        self.memory = ObjectMemory()
         self.camera = CameraService()
         self.detector = PlasticDetector()
+        self.detector.set_memory(self.memory)
         self.sorter = ServoSorter()
         self.window = "Plastic Segregation"
+        self._train_frame: Optional[np.ndarray] = None
 
     def set_status(self, msg: str, seconds: float = 2.5) -> None:
         self.status_msg = msg
@@ -75,11 +77,6 @@ class DisplayApp:
             if btn.x1 <= x <= btn.x2 and btn.y1 <= y <= btn.y2:
                 self.click_action = btn.name
                 return
-        if self.pending is not None:
-            if point_in_zone(x, y, self.left_zone_px):
-                self.click_action = "zone_left"
-            elif point_in_zone(x, y, self.right_zone_px):
-                self.click_action = "zone_right"
 
     def _build_buttons(self, w: int, h: int) -> None:
         bar_h = 56
@@ -127,7 +124,7 @@ class DisplayApp:
         for side, box in (("left", self.left_zone_px), ("right", self.right_zone_px)):
             label = self.cal.label_for_side(side)  # type: ignore[arg-type]
             angle = self.cal.angle_for_side(side)  # type: ignore[arg-type]
-            color = (46, 204, 113) if label == "recyclable" else (60, 76, 231)
+            color = (46, 204, 113) if label == "biodegradable" else (60, 76, 231)
             x1, y1, x2, y2 = box
             overlay = frame_bgr.copy()
             cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
@@ -164,36 +161,45 @@ class DisplayApp:
                 cv2.LINE_AA,
             )
 
-    def _draw_train_prompt(self, frame_bgr: np.ndarray, det: Detection) -> None:
+    def _draw_train_box(self, frame_bgr: np.ndarray) -> None:
+        """Yellow center capture box while TRAIN is ON."""
         h, w = frame_bgr.shape[:2]
-        panel = np.zeros_like(frame_bgr)
-        cv2.rectangle(panel, (w // 8, h // 5), (7 * w // 8, 3 * h // 5), (20, 20, 20), -1)
-        cv2.addWeighted(panel, 0.75, frame_bgr, 0.25, 0, frame_bgr)
-        cv2.rectangle(frame_bgr, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 255), 3)
-        lines = [
-            "TRAINING LABEL",
-            "Choose class for detected object",
-            "1 = recyclable     2 = non-recyclable",
-            "or click LEFT / RIGHT drop box",
-            "ESC = skip",
-        ]
-        y = h // 5 + 45
-        for i, line in enumerate(lines):
-            cv2.putText(
-                frame_bgr,
-                line,
-                (w // 8 + 24, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0 if i == 0 else 0.7,
-                (255, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            y += 40
+        x1, y1, x2, y2 = center_train_box(w, h)
+        cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 255, 255), 3)
+        cv2.putText(
+            frame_bgr,
+            "TRAIN BOX",
+            (x1 + 8, y1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame_bgr,
+            "1 = biodegradable   2 = non-biodegradable",
+            (x1 + 8, y2 + 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame_bgr,
+            f"memory={len(self.memory)} saved",
+            (x1 + 8, y2 + 56),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 220, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
     def _draw_cal_prompt(self, frame_bgr: np.ndarray) -> None:
         h, w = frame_bgr.shape[:2]
-        target = "RECYCLABLE" if self.cal_step == 0 else "NON-RECYCLABLE"
+        target = "BIODEGRADABLE" if self.cal_step == 0 else "NON-BIODEGRADABLE"
         lines = [
             f"SERVO CALIBRATION — {target}",
             f"Angle now: {self.cal_angle:+.0f} deg  (servo holds this position)",
@@ -207,25 +213,37 @@ class DisplayApp:
             cv2.putText(frame_bgr, line, (36, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 220, 255), 2, cv2.LINE_AA)
             y += 38
 
-    def _accept_label(self, label: str) -> None:
-        if self.pending is None:
+    def _teach_center(self, label: str) -> None:
+        """Save center-box sample and remember the object forever (USB memory)."""
+        if self._train_frame is None:
+            self.set_status("No frame yet")
             return
-        frame, det = self.pending
-        path = save_training_sample(frame, det, label)
-        self.pending = None
-        self.last_train_prompt = time.monotonic()
-        count = len(list((config.YOLO_DATASET / "labels" / "train").glob("*.txt")))
-        name = path.name if path else label
-        self.set_status(f"Saved {label} ({count} labels) · {name}")
+        now = time.monotonic()
+        if now - self.last_train_save < 0.6:
+            return
+        frame = self._train_frame
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = center_train_box(w, h)
+        roi = frame[y1:y2, x1:x2]
+        try:
+            mem_name = self.memory.remember(roi, label)
+        except Exception as exc:  # noqa: BLE001
+            self.set_status(f"Remember failed: {exc}")
+            return
+        path, _det = save_center_training_sample(frame, label)
+        self.last_train_save = now
+        yolo_n = len(list((config.YOLO_DATASET / "labels" / "train").glob("*.txt")))
+        fname = path.name if path else ""
+        self.set_status(f"Remembered {label} · {mem_name} · labels={yolo_n} {fname}")
+        # Show the mapped drop immediately so the operator confirms the class.
         self.sorter.sort_label(label)
 
     def _start_calibration(self) -> None:
         self.calibrating = True
         self.cal_step = 0
         self.cal_angle = float(self.cal.recyclable_angle)
-        self.pending = None
         self.sorter.set_angle(self.cal_angle, "calibrate")
-        self.set_status("Set RECYCLABLE servo angle, then ENTER")
+        self.set_status("Set BIODEGRADABLE servo angle, then ENTER")
 
     def _finish_cal_step(self) -> None:
         if self.cal_step == 0:
@@ -233,7 +251,7 @@ class DisplayApp:
             self.cal_step = 1
             self.cal_angle = float(self.cal.non_recyclable_angle)
             self.sorter.set_angle(self.cal_angle, "calibrate")
-            self.set_status("Set NON-RECYCLABLE servo angle, then ENTER")
+            self.set_status("Set NON-BIODEGRADABLE servo angle, then ENTER")
             return
         self.cal.non_recyclable_angle = self.cal_angle
         save_calibration(self.cal)
@@ -285,25 +303,20 @@ class DisplayApp:
                 self._swap_bins()
             return True
 
-        if self.pending is not None:
-            if key in (ord("1"), ord("r")):
-                self._accept_label("recyclable")
-            elif key in (ord("2"), ord("n")):
-                self._accept_label("non_recyclable")
-            elif action == "zone_left":
-                self._accept_label(self.cal.label_for_side("left"))
-            elif action == "zone_right":
-                self._accept_label(self.cal.label_for_side("right"))
-            elif key == 27:
-                self.pending = None
-                self.last_train_prompt = time.monotonic()
-                self.set_status("Skipped label")
-            return True
+        # TRAIN mode: yellow center box + 1/2 keys remember the object.
+        if self.training and not self.calibrating:
+            if key in (ord("1"), ord("b"), ord("r")):
+                self._teach_center("biodegradable")
+                return True
+            if key in (ord("2"), ord("n")):
+                self._teach_center("non_biodegradable")
+                return True
 
         if action == "train" or key == ord("t"):
             self.training = not self.training
-            self.pending = None
-            self.set_status(f"Training {'ON' if self.training else 'OFF'}")
+            self.set_status(
+                f"Training {'ON — place object in yellow box, press 1 or 2' if self.training else 'OFF'}"
+            )
         elif action == "calibrate" or key == ord("c"):
             self._start_calibration()
         elif action == "home" or key == ord("h"):
@@ -335,12 +348,11 @@ class DisplayApp:
 
         print(
             "Controls:\n"
-            "  TRAIN button / t   toggle training labels\n"
-            "  CALIBRATE / c      set recyclable & non-recyclable servo angles\n"
+            "  TRAIN / t   yellow center box → press 1=biodegradable or 2=non-biodegradable\n"
+            "  CALIBRATE / c      set biodegradable & non-biodegradable servo angles\n"
             "  SWAP BINS / s      flip which side is which\n"
             "  AUTO / a           auto drop with servo\n"
             "  r / n              manual drop    h home    q quit\n"
-            "  Training prompt: 1=recyclable  2=non-recyclable  or click LEFT/RIGHT box\n"
             "  Calibration: [ ] +/-5°  - = +/-1°  ENTER save side"
         )
 
@@ -351,18 +363,19 @@ class DisplayApp:
                     time.sleep(0.02)
                     continue
 
+                self._train_frame = frame
                 h, w = frame.shape[:2]
                 self._build_buttons(w, h)
 
                 action = self.click_action
                 self.click_action = None
 
-                detections = [] if self.calibrating else self.detector.detect(frame)
+                # While teaching, keep the view clean except yellow box + drop zones.
+                detections = [] if (self.calibrating or self.training) else self.detector.detect(frame)
                 annotated = draw_detections(frame, detections)
                 show = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
                 self._draw_zones(show)
 
-                best: Optional[Detection] = None
                 decision = None
                 if detections:
                     best = max(detections, key=lambda d: d.confidence)
@@ -370,30 +383,20 @@ class DisplayApp:
                         decision = best.label
 
                 now = time.monotonic()
-                if (
-                    self.training
-                    and not self.calibrating
-                    and self.pending is None
-                    and best is not None
-                    and best.confidence >= config.CONF_THRESHOLD
-                    and now - self.last_train_prompt >= config.TRAIN_PROMPT_COOLDOWN
-                ):
-                    self.pending = (frame.copy(), best)
-
-                if self.pending is not None:
-                    self._draw_train_prompt(show, self.pending[1])
+                if self.training and not self.calibrating:
+                    self._draw_train_box(show)
                 if self.calibrating:
                     self._draw_cal_prompt(show)
 
                 hud = (
-                    f"dets={len(detections)}  "
+                    f"dets={len(detections)}  mem={len(self.memory)}  AF=near  "
                     f"LEFT={self.cal.label_for_side('left')}@{self.cal.angle_for_side('left'):+.0f}°  "
                     f"RIGHT={self.cal.label_for_side('right')}@{self.cal.angle_for_side('right'):+.0f}°  "
                     f"train={'ON' if self.training else 'OFF'}  auto={'ON' if self.auto_sort else 'OFF'}"
                 )
-                if decision and self.pending is None and not self.calibrating:
+                if decision and not self.training and not self.calibrating:
                     hud += f"  |  {decision}"
-                cv2.putText(show, hud, (16, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(show, hud, (16, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
                 if self.status_msg and now < self.status_until:
                     cv2.putText(
                         show,
@@ -412,7 +415,6 @@ class DisplayApp:
                     self.auto_sort
                     and not self.training
                     and not self.calibrating
-                    and self.pending is None
                     and decision
                     and not self.sorter.status["busy"]
                     and now - self.last_sort >= config.SORT_COOLDOWN_SECONDS
