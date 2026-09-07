@@ -34,9 +34,9 @@ NON_RECYCLABLE_CLASSES = {"non_recyclable"}
 CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1280"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "720"))
 CAMERA_FPS = int(os.getenv("CAMERA_FPS", "15"))
-CAMERA_BRIGHTNESS = float(os.getenv("CAMERA_BRIGHTNESS", "0.12"))
-CAMERA_CONTRAST = float(os.getenv("CAMERA_CONTRAST", "1.15"))
-CAMERA_SATURATION = float(os.getenv("CAMERA_SATURATION", "1.1"))
+# Manual focus in dioptres (1.0 ≈ 1 m). Autofocus is disabled in camera.py.
+CAMERA_LENS_POSITION = float(os.getenv("CAMERA_LENS_POSITION", "1.0"))
+CAMERA_SHARPNESS = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
 
 # Inference
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Object Counter</string>
+    <string name="server_hint">http://192.168.1.50:8000</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="live_label">Now in view</string>
+    <string name="session_label">Session total</string>
+    <string name="recyclable">Recyclable</string>
+    <string name="non_recyclable">Non-recyclable</string>
+    <string name="reset">Reset totals</string>
+    <string name="add_current">Add current to total</string>
+    <string name="status_idle">Not connected — start the Pi with run_api.sh</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="no_objects">No objects in this frame</string>
+    <string name="live_objects">%d objects</string>
+</resources>

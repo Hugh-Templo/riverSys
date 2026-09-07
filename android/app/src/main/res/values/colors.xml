@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0F1412</color>
+    <color name="surface">#1A221E</color>
+    <color name="surface_alt">#24302A</color>
+    <color name="text">#F4F7F5</color>
+    <color name="muted">#9BB0A6</color>
+    <color name="accent">#2ECC71</color>
+    <color name="recyclable">#2ECC71</color>
+    <color name="non_recyclable">#E74C3C</color>
+    <color name="warning">#F1C40F</color>
+    <color name="stroke">#33443C</color>
+    <color name="ic_launcher_background">#12261C</color>
+</resources>

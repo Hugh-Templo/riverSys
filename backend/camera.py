@@ -39,35 +39,47 @@ class CameraService:
         try:
             from picamera2 import Picamera2
 
+            try:
+                from libcamera import controls as lc_controls
+            except ImportError:
+                lc_controls = None
+
             picam = Picamera2()
-            cam_config = picam.create_preview_configuration(
+            # Video config is a continuous still-quality stream (preview is softer / more scaled).
+            cam_config = picam.create_video_configuration(
                 main={
                     "size": (config.CAMERA_WIDTH, config.CAMERA_HEIGHT),
                     "format": "RGB888",
                 },
                 controls={"FrameRate": config.CAMERA_FPS},
+                buffer_count=4,
             )
             picam.configure(cam_config)
             picam.start()
-            # Brighten dim indoor/water scenes so OpenCV heuristics can see plastics.
+
+            # Fixed lens only — Camera Module 3 AF hunts on water and blurs objects.
+            af_mode = getattr(getattr(lc_controls, "AfModeEnum", None), "Manual", 0)
+            camera_controls = {
+                "AfMode": af_mode,
+                "LensPosition": float(config.CAMERA_LENS_POSITION),
+                "Sharpness": float(config.CAMERA_SHARPNESS),
+            }
             try:
-                picam.set_controls(
-                    {
-                        "AeEnable": True,
-                        "AwbEnable": True,
-                        "Brightness": float(getattr(config, "CAMERA_BRIGHTNESS", 0.12)),
-                        "Contrast": float(getattr(config, "CAMERA_CONTRAST", 1.15)),
-                        "Saturation": float(getattr(config, "CAMERA_SATURATION", 1.1)),
-                    }
-                )
+                picam.set_controls(camera_controls)
             except Exception as ctrl_exc:  # noqa: BLE001
-                logger.warning("Camera image controls not applied: %s", ctrl_exc)
+                logger.warning("Focus/sharpness controls not applied (%s); retrying without AF", ctrl_exc)
+                try:
+                    picam.set_controls({"Sharpness": float(config.CAMERA_SHARPNESS)})
+                except Exception:  # noqa: BLE001
+                    pass
+
             self._picam = picam
             self._mock = False
             logger.info(
-                "Camera Module 3 started at %sx%s",
+                "Camera Module 3 started at %sx%s (manual focus, lens=%.2f dpt)",
                 config.CAMERA_WIDTH,
                 config.CAMERA_HEIGHT,
+                config.CAMERA_LENS_POSITION,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Camera unavailable (%s); using mock frames", exc)
