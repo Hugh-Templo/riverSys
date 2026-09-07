@@ -22,13 +22,16 @@ CUSTOM_WEIGHTS = MODELS_DIR / "plastic_yolov8n.pt"
 BASE_WEIGHTS = MODELS_DIR / "yolov8n.pt"
 
 CLASS_NAMES = {
-    0: "recyclable",
-    1: "non_recyclable",
+    0: "biodegradable",
+    1: "non_biodegradable",
 }
 
-# Recyclable plastics → servo left; non-recyclable → servo right.
-RECYCLABLE_CLASSES = {"recyclable"}
-NON_RECYCLABLE_CLASSES = {"non_recyclable"}
+# Biodegradable → servo left; non-biodegradable → servo right.
+BIODEGRADABLE_CLASSES = {"biodegradable", "recyclable"}  # recyclable = legacy alias
+NON_BIODEGRADABLE_CLASSES = {"non_biodegradable", "non_recyclable"}
+# Back-compat aliases used by older code paths.
+RECYCLABLE_CLASSES = BIODEGRADABLE_CLASSES
+NON_RECYCLABLE_CLASSES = NON_BIODEGRADABLE_CLASSES
 
 # Camera Module 3 capture size (good speed/quality balance on Pi 5).
 CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1280"))
@@ -38,21 +41,44 @@ CAMERA_FPS = int(os.getenv("CAMERA_FPS", "15"))
 CAMERA_LENS_POSITION = float(os.getenv("CAMERA_LENS_POSITION", "1.0"))
 CAMERA_SHARPNESS = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
 
+# Preferred stand-off for placement guidance (HUD). Focus is continuous near/macro AF.
+DETECT_DISTANCE_INCHES = float(os.getenv("DETECT_DISTANCE_INCHES", "40"))
+# Continuous near autofocus (Macro). Set CAMERA_AF_MODE=manual to lock diopters instead.
+CAMERA_AF_MODE = os.getenv("CAMERA_AF_MODE", "continuous_near").lower()
+DETECT_LENS_DIOPTERS = float(
+    os.getenv(
+        "DETECT_LENS_DIOPTERS",
+        f"{(1.0 / max(DETECT_DISTANCE_INCHES * 0.0254, 0.05)):.4f}",
+    )
+)
+# Keep at 1.0 — digital zoom only shrank boxes; it did not change real range.
+DETECT_ZOOM = float(os.getenv("DETECT_ZOOM", "1.0"))
+
 # Inference
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.30"))
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.28"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 INFER_IMGSZ = int(os.getenv("INFER_IMGSZ", "640"))
 USE_OPENCV_FALLBACK = os.getenv("USE_OPENCV_FALLBACK", "1") == "1"
-OPENCV_MIN_AREA_FRAC = float(os.getenv("OPENCV_MIN_AREA_FRAC", "0.0006"))
-OPENCV_MAX_AREA_FRAC = float(os.getenv("OPENCV_MAX_AREA_FRAC", "0.35"))
+# Smaller fractions so bottle/bag at ~28" still passes the size gate.
+OPENCV_MIN_AREA_FRAC = float(os.getenv("OPENCV_MIN_AREA_FRAC", "0.00018"))
+OPENCV_MAX_AREA_FRAC = float(os.getenv("OPENCV_MAX_AREA_FRAC", "0.12"))
 OPENCV_MAX_DETS = int(os.getenv("OPENCV_MAX_DETS", "8"))
+OPENCV_MIN_BOX_PX = int(os.getenv("OPENCV_MIN_BOX_PX", "12"))
+# Ignore near-black frames (hand over lens) which create false detections.
+OPENCV_MIN_MEAN_LUMA = float(os.getenv("OPENCV_MIN_MEAN_LUMA", "28"))
+OPENCV_MIN_LUMA_STD = float(os.getenv("OPENCV_MIN_LUMA_STD", "12"))
+# Skip blurry frames (AF hunting / out of focus) — Laplacian variance on a fixed-size center patch.
+OPENCV_MIN_SHARPNESS = float(os.getenv("OPENCV_MIN_SHARPNESS", "18"))
 
 # Servo (signal wire on this BCM pin; power the 20kg servo from an external 5–6V supply).
 SERVO_PIN = int(os.getenv("SERVO_PIN", "18"))
 SERVO_RECYCLABLE_ANGLE = float(os.getenv("SERVO_RECYCLABLE_ANGLE", "-60"))
 SERVO_NON_RECYCLABLE_ANGLE = float(os.getenv("SERVO_NON_RECYCLABLE_ANGLE", "60"))
 SERVO_HOME_ANGLE = float(os.getenv("SERVO_HOME_ANGLE", "0"))
-SERVO_HOLD_SECONDS = float(os.getenv("SERVO_HOLD_SECONDS", "1.2"))
+# Hold at the drop angle so material can fall clear.
+SERVO_HOLD_SECONDS = float(os.getenv("SERVO_HOLD_SECONDS", "3"))
+# Time to ramp from current angle → drop (and drop → home) for smoother motion.
+SERVO_MOVE_SECONDS = float(os.getenv("SERVO_MOVE_SECONDS", "5"))
 SERVO_ENABLED = os.getenv("SERVO_ENABLED", "1") == "1"
 SERVO_MIN_PULSE = float(os.getenv("SERVO_MIN_PULSE", "0.0005"))
 SERVO_MAX_PULSE = float(os.getenv("SERVO_MAX_PULSE", "0.0025"))

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
-from . import config
+try:
+    from . import config
+except ImportError:  # python backend/camera.py (no package parent)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from backend import config
 
 logger = logging.getLogger(__name__)
 
@@ -39,47 +45,91 @@ class CameraService:
         try:
             from picamera2 import Picamera2
 
-            try:
-                from libcamera import controls as lc_controls
-            except ImportError:
-                lc_controls = None
-
             picam = Picamera2()
-            # Video config is a continuous still-quality stream (preview is softer / more scaled).
-            cam_config = picam.create_video_configuration(
+            cam_config = picam.create_preview_configuration(
                 main={
                     "size": (config.CAMERA_WIDTH, config.CAMERA_HEIGHT),
                     "format": "RGB888",
                 },
                 controls={"FrameRate": config.CAMERA_FPS},
-                buffer_count=4,
             )
             picam.configure(cam_config)
             picam.start()
-
-            # Fixed lens only — Camera Module 3 AF hunts on water and blurs objects.
-            af_mode = getattr(getattr(lc_controls, "AfModeEnum", None), "Manual", 0)
-            camera_controls = {
-                "AfMode": af_mode,
-                "LensPosition": float(config.CAMERA_LENS_POSITION),
-                "Sharpness": float(config.CAMERA_SHARPNESS),
-            }
+            # Brighten scene + prefer near-object continuous autofocus (Camera Module 3).
             try:
-                picam.set_controls(camera_controls)
-            except Exception as ctrl_exc:  # noqa: BLE001
-                logger.warning("Focus/sharpness controls not applied (%s); retrying without AF", ctrl_exc)
-                try:
-                    picam.set_controls({"Sharpness": float(config.CAMERA_SHARPNESS)})
-                except Exception:  # noqa: BLE001
-                    pass
+                from libcamera import controls
 
+                image_controls = {
+                    "AeEnable": True,
+                    "AwbEnable": True,
+                    "Brightness": float(config.CAMERA_BRIGHTNESS),
+                    "Contrast": float(config.CAMERA_CONTRAST),
+                    "Saturation": float(config.CAMERA_SATURATION),
+                }
+                af_mode = config.CAMERA_AF_MODE
+                if af_mode in {"continuous_near", "continuous", "near", "macro"}:
+                    image_controls.update(
+                        {
+                            "AfMode": controls.AfModeEnum.Continuous,
+                            "AfRange": controls.AfRangeEnum.Macro,
+                            "AfSpeed": controls.AfSpeedEnum.Fast,
+                            "AfMetering": controls.AfMeteringEnum.Windows,
+                        }
+                    )
+                    # Center AF window so focus prefers the object in front of the camera.
+                    w, h = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+                    aw, ah = int(w * 0.45), int(h * 0.45)
+                    ax, ay = (w - aw) // 2, (h - ah) // 2
+                    image_controls["AfWindows"] = [(ax, ay, aw, ah)]
+                    logger.info(
+                        "Autofocus: continuous near/macro (center window) — target place ~%.0f in",
+                        config.DETECT_DISTANCE_INCHES,
+                    )
+                else:
+                    image_controls.update(
+                        {
+                            "AfMode": controls.AfModeEnum.Manual,
+                            "LensPosition": float(config.DETECT_LENS_DIOPTERS),
+                        }
+                    )
+                    logger.info(
+                        "Focus manual lock ~%.0f in (LensPosition=%.2f D)",
+                        config.DETECT_DISTANCE_INCHES,
+                        config.DETECT_LENS_DIOPTERS,
+                    )
+                picam.set_controls(image_controls)
+            except Exception as ctrl_exc:  # noqa: BLE001
+                logger.warning("Camera image/focus controls not applied: %s", ctrl_exc)
+                try:
+                    from libcamera import controls
+
+                    picam.set_controls(
+                        {
+                            "AeEnable": True,
+                            "AwbEnable": True,
+                            "AfMode": controls.AfModeEnum.Continuous,
+                            "AfRange": controls.AfRangeEnum.Macro,
+                        }
+                    )
+                except Exception:  # noqa: BLE001
+                    try:
+                        picam.set_controls(
+                            {
+                                "AeEnable": True,
+                                "AwbEnable": True,
+                                "Brightness": float(config.CAMERA_BRIGHTNESS),
+                                "Contrast": float(config.CAMERA_CONTRAST),
+                                "Saturation": float(config.CAMERA_SATURATION),
+                            }
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
             self._picam = picam
             self._mock = False
             logger.info(
-                "Camera Module 3 started at %sx%s (manual focus, lens=%.2f dpt)",
+                "Camera Module 3 started at %sx%s",
                 config.CAMERA_WIDTH,
                 config.CAMERA_HEIGHT,
-                config.CAMERA_LENS_POSITION,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Camera unavailable (%s); using mock frames", exc)
@@ -151,3 +201,22 @@ class CameraService:
             frame[h // 3 : h // 2, w // 3 : w // 2] = (240, 200, 200)
         _ = cv2_available
         return frame
+
+
+if __name__ == "__main__":
+    import time
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    cam = CameraService()
+    cam.start()
+    try:
+        time.sleep(1.5)
+        frame = cam.get_frame()
+        print(
+            "frame",
+            None if frame is None else frame.shape,
+            "mock",
+            cam.using_mock,
+        )
+    finally:
+        cam.stop()

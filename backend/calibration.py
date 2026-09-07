@@ -35,21 +35,27 @@ class Calibration:
         config.SERVO_HOME_ANGLE = float(self.home_angle)
 
     def side_for_label(self, label: str) -> Side:
-        if label == "recyclable":
+        if label in {"biodegradable", "recyclable"}:
             return self.recyclable_side
         return "right" if self.recyclable_side == "left" else "left"
 
     def label_for_side(self, side: Side) -> str:
         if side == self.recyclable_side:
-            return "recyclable"
-        return "non_recyclable"
+            return "biodegradable"
+        return "non_biodegradable"
 
     def angle_for_side(self, side: Side) -> float:
         label = self.label_for_side(side)
-        return self.recyclable_angle if label == "recyclable" else self.non_recyclable_angle
+        return (
+            self.recyclable_angle
+            if label == "biodegradable"
+            else self.non_recyclable_angle
+        )
 
     def angle_for_label(self, label: str) -> float:
-        return self.recyclable_angle if label == "recyclable" else self.non_recyclable_angle
+        if label in {"biodegradable", "recyclable"}:
+            return self.recyclable_angle
+        return self.non_recyclable_angle
 
     def zone_for_side(self, side: Side) -> tuple[float, float, float]:
         return self.left_zone if side == "left" else self.right_zone

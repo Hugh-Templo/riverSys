@@ -11,10 +11,17 @@ import numpy as np
 
 from . import config
 from .detector import Detection
+from .object_memory import center_train_box
 
 logger = logging.getLogger(__name__)
 
-CLASS_ID = {"recyclable": 0, "non_recyclable": 1}
+CLASS_ID = {
+    "biodegradable": 0,
+    "non_biodegradable": 1,
+    # Legacy aliases from older datasets / UI.
+    "recyclable": 0,
+    "non_recyclable": 1,
+}
 
 
 def save_training_sample(frame_rgb: np.ndarray, det: Detection, label: str) -> Path | None:
@@ -50,3 +57,20 @@ def save_training_sample(frame_rgb: np.ndarray, det: Detection, label: str) -> P
     lbl_path.write_text(f"{CLASS_ID[label]} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}\n", encoding="utf-8")
     logger.info("Saved training sample %s (%s)", img_path.name, label)
     return img_path
+
+
+def save_center_training_sample(frame_rgb: np.ndarray, label: str) -> tuple[Path | None, Detection]:
+    """Label whatever is inside the yellow center TRAIN box."""
+    h, w = frame_rgb.shape[:2]
+    x1, y1, x2, y2 = center_train_box(w, h)
+    det = Detection(
+        label=label,
+        confidence=1.0,
+        x1=x1,
+        y1=y1,
+        x2=x2,
+        y2=y2,
+        source="train",
+    )
+    path = save_training_sample(frame_rgb, det, label)
+    return path, det
